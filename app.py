@@ -1,300 +1,236 @@
-import os
-import sys
-import json
-import hashlib  # Added to resolve "hashlib" is not defined
-import requests
-import random
-import time
+from flask import Flask, jsonify, render_template, request, redirect, url_for, session, flash
 import concurrent.futures
-from typing import Union  # Added to resolve "Union" is not defined
-from urllib import parse  # Added to resolve "parse" is not defined
-from datetime import datetime, timedelta
-from html.parser import HTMLParser
-from flask import Flask, render_template, request, redirect, url_for, flash, session as flask_session, Response, abort
+import os
+import stripe
+from ZybookAuto import signin, get_books, get_chapters, solve_sections_in_range, ZyBooksError
+from itsdangerous import URLSafeTimedSerializer
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'  # Change this to a secure secret key for production
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your_secret_key')
+stripe.api_key = os.getenv('STRIPE_API_KEY', 'sk_test_51Q8pwiFmgPWKsb8SRovwP13AbMFgJGOHqJzBHxmprwCblwIDGJpmsr1GrtInwJzbnhd5mO9yo0T0SQRTMa7CMJ7x00q86pkSUz')
+serializer = URLSafeTimedSerializer(app.secret_key)
 
-session = requests.Session()
-t_spfd = 0
-progress_data = []  # This will hold the real-time progress data
-
-# Session timeout limit (e.g., 30 minutes)
-SESSION_TIMEOUT = timedelta(minutes=30)
-
-class ZyBooksError(Exception):
-    pass
-
-# Helper function to check if the user is authenticated
-def is_authenticated():
-    """Check if the user is authenticated and the session is still valid."""
-    return 'auth_token' in flask_session and 'user_id' in flask_session
-
-# Helper function to require login for routes
-def login_required(func):
-    """Decorator to enforce login on routes."""
-    def wrapper(*args, **kwargs):
-        if not is_authenticated():
-            flash("You need to log in first.", 'danger')
-            return redirect(url_for('index'))
-        return func(*args, **kwargs)
-    return wrapper
-
-# Session timeout management
-@app.before_request
-def check_session_timeout():
-    """Check if the session has timed out."""
-    if 'last_active' in flask_session:
-        now = datetime.now()
-        last_active = flask_session['last_active']
-        if now - last_active > SESSION_TIMEOUT:
-            flask_session.clear()
-            flash("Session timed out. Please log in again.", 'danger')
-            return redirect(url_for('index'))
-    flask_session['last_active'] = datetime.now()  # Update last activity time
-
-# All ZyBooks solver functions below:
-
-def signin(usr: str, pwd: str) -> dict:
-    try:
-        response = session.post("https://zyserver.zybooks.com/v1/signin", json={"email": usr, "password": pwd})
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("success"):
-            raise ZyBooksError("Failed to sign in")
-        return data["session"]
-    except requests.RequestException as e:
-        raise ZyBooksError(f"Network error during sign-in: {e}")
-
-def get_books(auth: str, usr_id: str) -> list:
-    try:
-        response = session.get(f"https://zyserver.zybooks.com/v1/user/{usr_id}/items?items=%5B%22zybooks%22%5D&auth_token={auth}")
-        response.raise_for_status()
-        data = response.json()
-        if not data.get("success"):
-            raise ZyBooksError("Failed to retrieve books")
-        return [book for book in data["items"]["zybooks"] if not book["autosubscribe"]]
-    except requests.RequestException as e:
-        raise ZyBooksError(f"Error fetching books: {e}")
-
-def get_chapters(code: str, auth: str) -> list:
-    try:
-        response = session.get(f"https://zyserver.zybooks.com/v1/zybooks?zybooks=%5B%22{code}%22%5D&auth_token={auth}")
-        response.raise_for_status()
-        return response.json()["zybooks"][0]["chapters"]
-    except requests.RequestException as e:
-        raise ZyBooksError(f"Error fetching chapters: {e}")
-
-def get_problems(code: str, chapter: int, section: int, auth: str) -> list:
-    try:
-        response = session.get(f"https://zyserver.zybooks.com/v1/zybook/{code}/chapter/{chapter}/section/{section}?auth_token={auth}")
-        response.raise_for_status()
-        return response.json()["section"]["content_resources"]
-    except requests.RequestException as e:
-        raise ZyBooksError(f"Error fetching problems: {e}")
-
-def solve_sections_in_range(section_input: str, chapters: list, code: str, auth: str):
-    global progress_data
-    progress_data.clear()  # Clear progress data before starting
-
-    sections_to_solve = parse_section_input(section_input)
-    for chapter_num, section_nums in sections_to_solve.items():
-        for chapter in chapters:
-            if int(chapter['number']) == chapter_num:
-                for section in chapter['sections']:
-                    if int(section['number']) in section_nums:
-                        solve_section(section, code, chapter, auth)
-
-def parse_section_input(section_input: str) -> dict:
-    # Simple validation for the section input format
-    if not section_input or any(char in section_input for char in "<>{}[]"):
-        raise ValueError("Invalid section input format.")
-
-    sections = section_input.replace(" ", "").split(",")
-    parsed_sections = {}
-    for sec in sections:
-        if "-" in sec:
-            start, end = sec.split("-")
-            start_ch, start_sec = map(int, start.split("."))
-            end_ch, end_sec = map(int, end.split("."))
-            for ch in range(start_ch, end_ch + 1):
-                if ch not in parsed_sections:
-                    parsed_sections[ch] = set()
-                parsed_sections[ch].update(range(start_sec if ch == start_ch else 1, end_sec + 1 if ch == end_ch else 100))
-        else:
-            ch, sec = map(int, sec.split("."))
-            if ch not in parsed_sections:
-                parsed_sections[ch] = set()
-            parsed_sections[ch].add(sec)
-    return parsed_sections
-
-def solve_section(section, code, chapter, auth):
-    sec_name = f"{chapter['number']}.{section['number']}"
-    sec_id = section["canonical_section_id"]
-
-    try:
-        problems = get_problems(code, chapter["number"], section["number"], auth)
-    except Exception as e:
-        progress_data.append(f"Failed solving {sec_name}, skipping section due to error: {e}")
-        return
-
-    progress_data.append(f"Starting section {sec_name}: {section['title']}")
-
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        for problem in problems:
-            act_id = problem["id"]
-            parts = problem.get("parts", 1)
-            for part in range(parts):
-                executor.submit(solve_part, act_id, sec_id, auth, part, code)
-
-def solve_part(act_id: str, sec_id: str, auth: str, part: int, code: str) -> bool:
-    try:
-        spend_time(auth, sec_id, act_id, part, code)
-        ts = gen_timestamp()
-        chksm = gen_chksum(act_id, ts, auth, part)
-        url = f"https://zyserver.zybooks.com/v1/content_resource/{act_id}/activity"
-        headers = {
-            "Host": "zyserver.zybooks.com",
-            "User-Agent": "Mozilla/5.0",
-            "Content-Type": "application/json",
-            "Origin": "https://learn.zybooks.com"
-        }
-        data = {
-            "part": part,
-            "complete": True,
-            "metadata": "{}",
-            "zybook_code": code,
-            "auth_token": auth,
-            "timestamp": ts,
-            "__cs__": chksm
-        }
-
-        response = session.post(url, json=data, headers=headers)
-        response.raise_for_status()
-        progress_data.append(f"Solved part {part+1} of activity {act_id}")
-        return response.json().get("success", False)
-    except Exception as e:
-        progress_data.append(f"Error solving part {part+1} of activity {act_id}: {e}")
-        return False
-
-def spend_time(auth: str, sec_id: str, act_id: str, part: int, code: str) -> bool:
-    global t_spfd
-    try:
-        time_spent = max(random.randint(20, 60), 20)
-        t_spfd += time_spent
-        data = {
-            "time_spent_records": [
-                {
-                    "canonical_section_id": sec_id,
-                    "content_resource_id": act_id,
-                    "part": part,
-                    "time_spent": time_spent,
-                    "timestamp": gen_timestamp()
-                }
-            ],
-            "auth_token": auth
-        }
-        response = session.post(f"https://zyserver2.zybooks.com/v1/zybook/{code}/time_spent", json=data)
-        response.raise_for_status()
-        return response.json().get("success", False)
-    except requests.RequestException as e:
-        progress_data.append(f"Error in spend_time: {e}")
-        return False
-
-def gen_timestamp() -> str:
-    global t_spfd
-    current_time = datetime.now() + timedelta(seconds=t_spfd)
-    ms = f"{random.randint(0, 999):03}"
-    return current_time.strftime(f"%Y-%m-%dT%H:%M:%S.{ms}Z")
-
-def gen_chksum(act_id: str, ts: str, auth: str, part: int) -> str:
-    md5 = hashlib.md5()
-    data = f"content_resource/{act_id}/activity{ts}{auth}{act_id}{part}true{get_buildkey()}"
-    md5.update(data.encode("utf-8"))
-    return md5.hexdigest()
-
-def get_buildkey() -> str:
-    class Parser(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.data = None
-
-        def handle_starttag(self, tag: str, attrs: list[tuple[str, Union[str, None]]]) -> None:
-            if tag == "meta" and attrs[0][1] == "zybooks-web/config/environment":
-                self.data = json.loads(parse.unquote(attrs[1][1]))['APP']['BUILDKEY']
-
-    try:
-        response = session.get("https://learn.zybooks.com")
-        response.raise_for_status()
-        p = Parser()
-        p.feed(response.text)
-        return p.data
-    except requests.RequestException as e:
-        raise ZyBooksError(f"Error fetching build key: {e}")
-
-# Flask routes
+# Route for login page
 @app.route('/', methods=['GET', 'POST'])
-def index():
+def login():
     if request.method == 'POST':
-        usr = request.form.get('username')
-        pwd = request.form.get('password')
+        usr = request.form['email']
+        pwd = request.form['password']
         try:
-            response = signin(usr, pwd)
-            flask_session['auth_token'] = response["auth_token"]
-            flask_session['user_id'] = response["user_id"]
-            return redirect(url_for('select_book'))
+            session_data = signin(usr, pwd)
+            session['user_id'] = session_data['user_id']
+            session['email'] = usr
+            session['auth_token'] = serializer.dumps(session_data['auth_token'])
+            return redirect(url_for('zybook'))
         except ZyBooksError as e:
-            flash(f"Login failed: {str(e)}", 'danger')
+            flash(f"Login failed: {str(e)}")
+            return render_template('login.html')
+    return render_template('login.html')
 
-    return render_template('index.html')
+# Route for selecting ZyBook and sections
+@app.route('/zybook', methods=['GET', 'POST'])
+def zybook():
+    if 'auth_token' not in session:
+        return redirect(url_for('login'))
 
-@app.route('/select_book', methods=['GET', 'POST'])
-@login_required  # Enforce login for this route
-def select_book():
-    auth_token = flask_session['auth_token']
-    user_id = flask_session['user_id']
+    try:
+        auth = serializer.loads(session['auth_token'], max_age=3600)
+    except Exception:
+        flash("Session expired. Please log in again.")
+        return redirect(url_for('login'))
+
+    usr_id = session['user_id']
+
+    # Get list of ZyBooks
+    try:
+        books = get_books(auth, usr_id)
+        if request.method == 'POST':
+            selected_book_index = int(request.form['zybook']) - 1
+            selected_book = books[selected_book_index]
+            session['zybook_code'] = selected_book['zybook_code']
+            return redirect(url_for('select_sections'))
+        return render_template('zybook.html', books=books)
+    except ZyBooksError as e:
+        flash(f"Failed to retrieve ZyBooks: {str(e)}")
+        return redirect(url_for('login'))
+
+# Route for selecting sections and solving
+@app.route('/select_sections', methods=['GET', 'POST'])
+def select_sections():
+    if 'zybook_code' not in session:
+        return redirect(url_for('zybook'))
+
+    try:
+        auth = serializer.loads(session['auth_token'], max_age=3600)
+    except Exception:
+        flash("Session expired. Please log in again.")
+        return redirect(url_for('login'))
+
+    zybook_code = session['zybook_code']
+    chapters = get_chapters(zybook_code, auth)
 
     if request.method == 'POST':
-        selected_book = request.form.get('book')
-        section_input = request.form.get('sections')
-        flask_session['selected_book'] = selected_book
-        flask_session['section_input'] = section_input
-        return redirect(url_for('solve'))
+        # Parse the input string (e.g., "5.6-5.7, 5.9")
+        section_ranges = request.form['sections'].split(',')
+        section_count = 0
 
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Loop through each range and calculate the sections
+            futures = []
+            for section_range in section_ranges:
+                section_range = section_range.strip()
+                if '-' in section_range:
+                    # Range format (e.g., "5.6-5.7")
+                    start, end = section_range.split('-')
+                    start_chapter, start_section = map(int, start.split('.'))
+                    end_chapter, end_section = map(int, end.split('.'))
+                else:
+                    # Single section format (e.g., "5.9")
+                    start_chapter, start_section = map(int, section_range.split('.'))
+                    end_chapter, end_section = start_chapter, start_section
+
+                # Calculate the number of sections for the current range
+                section_count += calculate_sections(chapters, start_chapter, start_section, end_chapter, end_section)
+
+                # Start solving sections using thread pool
+                futures.append(executor.submit(solve_sections_in_range, start_chapter, start_section, end_chapter, end_section, chapters, zybook_code, auth))
+
+        flash(f"Started solving {section_count} sections. Check the console for progress.")
+        return redirect(url_for('select_sections'))
+
+    return render_template('select_sections.html', chapters=chapters)
+
+def calculate_sections(chapters, start_chapter, start_section, end_chapter, end_section):
+    section_count = 0
+    counting_started = False
+
+    print(f"Start counting from chapter {start_chapter}.{start_section} to chapter {end_chapter}.{end_section}")
+
+    for chapter in chapters:
+        chapter_num = int(chapter['number'])
+        print(f"Checking chapter {chapter_num}...")
+
+        # Start counting when we hit the start chapter
+        if chapter_num == start_chapter:
+            print(f"Reached start chapter: {chapter_num}")
+            section_idx = 0  # Index to loop through sections in chapter
+            while section_idx < len(chapter['sections']):
+                section = chapter['sections'][section_idx]
+                section_num = int(section['number'])
+                print(f"Checking section {chapter_num}.{section_num}...")
+
+                # Only count sections from the start section onward
+                if section_num >= start_section:
+                    section_count += 1
+                    print(f"Counting section {chapter_num}.{section_num}, total count: {section_count}")
+
+                # Stop if we reach the end section in the start chapter
+                if chapter_num == end_chapter and section_num == end_section:
+                    print(f"Reached end section: {chapter_num}.{section_num}. Stopping.")
+                    return section_count
+
+                section_idx += 1
+
+            counting_started = True
+
+        # If counting has started and we're in an intermediate chapter, count all sections
+        elif counting_started and start_chapter < chapter_num < end_chapter:
+            print(f"Counting all sections in chapter {chapter_num}")
+            section_count += len(chapter['sections'])
+            print(f"Added {len(chapter['sections'])} sections, total count: {section_count}")
+
+        # If we're at the end chapter, use a while loop to count sections up to end section and stop
+        elif chapter_num == end_chapter:
+            print(f"Reached end chapter: {chapter_num}")
+            section_idx = 0
+            while section_idx < len(chapter['sections']):
+                section = chapter['sections'][section_idx]
+                section_num = int(section['number'])
+                print(f"Checking section {chapter_num}.{section_num}...")
+
+                # Count sections up to and including the end section
+                if section_num <= end_section:
+                    section_count += 1
+                    print(f"Counting section {chapter_num}.{section_num}, total count: {section_count}")
+
+                # Stop once the end section is reached
+                if section_num == end_section:
+                    print(f"Reached end section: {chapter_num}.{section_num}. Stopping.")
+                    return section_count
+
+                section_idx += 1
+
+    return section_count
+
+@app.route('/create-checkout-session/<sections>', methods=['GET'])
+def create_checkout_session(sections):
     try:
-        books = get_books(auth_token, user_id)
-        return render_template('select_book.html', books=books)
-    except ZyBooksError as e:
-        flash(f"Failed to load books: {str(e)}", 'danger')
-        return redirect(url_for('index'))
+        # Get the chapters from the session (since they were already retrieved during section selection)
+        if 'zybook_code' not in session or 'auth_token' not in session:
+            return redirect(url_for('login'))
 
-@app.route('/solve', methods=['GET'])
-@login_required  # Enforce login for this route
-def solve():
-    auth_token = flask_session['auth_token']
-    selected_book = flask_session['selected_book']
-    section_input = flask_session['section_input']
+        try:
+            auth = serializer.loads(session['auth_token'], max_age=3600)
+        except Exception:
+            flash("Session expired. Please log in again.")
+            return redirect(url_for('login'))
 
-    try:
-        chapters = get_chapters(selected_book, auth_token)
-        solve_sections_in_range(section_input, chapters, selected_book, auth_token)
-        flash(f'Successfully solved sections {section_input} for {selected_book}.', 'success')
+        zybook_code = session['zybook_code']
+        chapters = get_chapters(zybook_code, auth)
+
+        # Parse the input string (e.g., "5.6-5.7, 5.9")
+        section_ranges = sections.split(',')
+        section_count = 0
+
+        # Loop through each range and calculate the sections
+        for section_range in section_ranges:
+            section_range = section_range.strip()
+            if '-' in section_range:
+                # Range format (e.g., "5.6-5.7")
+                start, end = section_range.split('-')
+                start_chapter, start_section = map(int, start.split('.'))
+                end_chapter, end_section = map(int, end.split('.'))
+            else:
+                # Single section format (e.g., "5.9")
+                start_chapter, start_section = map(int, section_range.split('.'))
+                end_chapter, end_section = start_chapter, start_section
+
+            # Calculate the number of sections for the current range
+            section_count += calculate_sections(chapters, start_chapter, start_section, end_chapter, end_section)
+
+        # Calculate the total price (in cents) at $1.50 per section
+        price_per_section = 150  # $1.50 in cents
+        total_price = section_count * price_per_section
+
+        # Create a new Stripe Checkout Session
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {
+                        'name': 'ZyBooks Section Solver',
+                        'description': f'Solving {section_count} sections: {sections}',
+                    },
+                    'unit_amount': total_price,  # Total price based on number of sections
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            success_url=url_for('success', _external=True),
+            cancel_url=url_for('cancel', _external=True),
+        )
+        return jsonify({'id': checkout_session.id})
     except Exception as e:
-        flash(f"Error solving sections: {str(e)}", 'danger')
+        return str(e)
     
-    return render_template('progress.html')
+@app.route('/success')
+def success():
+    return "Payment was successful! We are now solving your ZyBook sections."
 
-# Route to stream progress updates
-@app.route('/progress_stream')
-@login_required  # Protect the progress stream from unauthorized access
-def progress_stream():
-    def generate():
-        while True:
-            if progress_data:
-                data = progress_data.pop(0)
-                yield f"data: {data}\n\n"
-            time.sleep(0.5)  # Introduce a short delay to simulate real-time updates
-    return Response(generate(), mimetype='text/event-stream')
+@app.route('/cancel')
+def cancel():
+    return "Payment was cancelled. Please try again."
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)

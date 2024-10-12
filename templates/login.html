@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZyBooks Auto Solver - Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #181818;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            color: #f39c12;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 2.5rem;
+        }
+        form {
+            background: #1f1f1f;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6);
+            max-width: 400px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        label {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #b3b3b3;
+            width: 100%;
+            text-align: center; /* Centering the label */
+        }
+        input[type="email"], input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 20px;
+            border: none;
+            border-radius: 8px;
+            background-color: #333;
+            color: #e0e0e0;
+            font-size: 1rem;
+        }
+        input:focus {
+            outline: none;
+            box-shadow: 0 0 8px #f39c12;
+        }
+        button {
+            background-color: #f39c12;
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #e67e22;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ZyBooks Auto Solver</h1>
+        <form action="/" method="POST">
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" required>
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" required>
+            <button type="submit">Login</button>
+        </form>
+
+        <!-- Display flash messages for errors -->
+        <div id="output">
+            {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <ul>
+                    {% for message in messages %}
+                        <li>{{ message }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+            {% endwith %}
+        </div>
+    </div>
+</body>
+</html>
