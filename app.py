@@ -6,8 +6,8 @@ from ZybookAuto import signin, get_books, get_chapters, solve_sections_in_range,
 from itsdangerous import URLSafeTimedSerializer
 
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your_secret_key')
-stripe.api_key = os.getenv('STRIPE_API_KEY', 'sk_test_51Q8pwiFmgPWKsb8SRovwP13AbMFgJGOHqJzBHxmprwCblwIDGJpmsr1GrtInwJzbnhd5mO9yo0T0SQRTMa7CMJ7x00q86pkSUz')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'supersupersupersecretkey')
+stripe.api_key = os.getenv('STRIPE_PRIVATE_KEY')
 serializer = URLSafeTimedSerializer(app.secret_key)
 
 # Route for login page
@@ -233,4 +233,4 @@ def cancel():
     return "Payment was cancelled. Please try again."
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False)

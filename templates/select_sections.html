@@ -78,7 +78,7 @@
     <script src="https://js.stripe.com/v3/"></script>
     <script type="text/javascript">
         function handlePayment(sessionId) {
-            var stripe = Stripe('pk_test_51Q8pwiFmgPWKsb8S87jTtBt2vMmD1sMAevrUtZG1kXmQtOYXZsb99gsTjhXQRB0LTKtkQvxGLqVf2rcgFIULElTs00dr5PLoCE');
+            var stripe = Stripe('pk_live_51MqddGCBdTsJD9eaDkC4g0ezhNszt42BIo8UtdR2WVkRGjYZdMV8ymQ3MNmCTa8KZMSjAYJvF1q0a6NGzUoI74SE00WcTvWZ6Q');
             stripe.redirectToCheckout({ sessionId: sessionId });
         }
 
