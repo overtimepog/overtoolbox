@@ -198,8 +198,8 @@ def create_checkout_session(sections):
             # Calculate the number of sections for the current range
             section_count += calculate_sections(chapters, start_chapter, start_section, end_chapter, end_section)
 
-        # Calculate the total price (in cents) at $1.50 per section
-        price_per_section = 150  # $1.50 in cents
+        # Calculate the total price (in cents) at $1.25 per section
+        price_per_section = 125 # $1.25 in cents
         total_price = section_count * price_per_section
 
         # Create a new Stripe Checkout Session
