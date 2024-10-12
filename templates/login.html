@@ -77,6 +77,13 @@
         button:hover {
             background-color: #e67e22;
         }
+        .note {
+            font-size: 0.9rem;
+            color: #b3b3b3;
+            margin-top: 10px;
+            text-align: center;
+            max-width: 400px;
+        }
     </style>
 </head>
 <body>
@@ -89,6 +96,11 @@
             <input type="password" id="password" name="password" required>
             <button type="submit">Login</button>
         </form>
+
+        <!-- Note below the form -->
+        <div class="note">
+            * This is the email and password you use to login to ZyBooks. This information is not stored or saved anywhere.
+        </div>
 
         <!-- Display flash messages for errors -->
         <div id="output">
