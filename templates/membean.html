@@ -33,35 +33,39 @@
                     <div class="card-body">
                         <form method="POST" id="membeanForm">
                             <div class="mb-3">
-                                <label for="email" class="form-label">Email:</label>
-                                <input type="email" class="form-control" id="email" name="email" required>
+                                <label for="email" class="form-label">Email (Use your Google login email):</label>
+                                <input type="email" class="form-control" id="email" name="email" value="{{ saved_email }}" required>
                             </div>
                             <div class="mb-3">
-                                <label for="password" class="form-label">Password:</label>
-                                <input type="password" class="form-control" id="password" name="password" required>
+                                <label for="password" class="form-label">Password (Use your Google login password):</label>
+                                <input type="password" class="form-control" id="password" name="password" value="{{ saved_password }}" required>
                             </div>
                             <div class="mb-3">
                                 <label for="grade" class="form-label">Target Grade:</label>
                                 <select class="form-select" id="grade" name="grade" required>
-                                    <option value="A+">A+</option>
-                                    <option value="A">A</option>
-                                    <option value="A-">A-</option>
-                                    <option value="B+">B+</option>
-                                    <option value="B">B</option>
-                                    <option value="B-">B-</option>
+                                    <option value="A+" {% if saved_grade == 'A+' %}selected{% endif %}>A+</option>
+                                    <option value="A" {% if saved_grade == 'A' %}selected{% endif %}>A</option>
+                                    <option value="A-" {% if saved_grade == 'A-' %}selected{% endif %}>A-</option>
+                                    <option value="B+" {% if saved_grade == 'B+' %}selected{% endif %}>B+</option>
+                                    <option value="B" {% if saved_grade == 'B' %}selected{% endif %}>B</option>
+                                    <option value="B-" {% if saved_grade == 'B-' %}selected{% endif %}>B-</option>
                                 </select>
                             </div>
                             <div class="mb-3">
                                 <label for="quiz" class="form-label">Quiz Mode:</label>
                                 <select class="form-select" id="quiz" name="quiz" required>
-                                    <option value="False">Disabled</option>
-                                    <option value="True">Enabled</option>
+                                    <option value="False" {% if saved_quiz == 'False' %}selected{% endif %}>Disabled</option>
+                                    <option value="True" {% if saved_quiz == 'True' %}selected{% endif %}>Enabled</option>
                                 </select>
                             </div>
                             <div class="mb-3" id="openaiKeyGroup" style="display: none;">
                                 <label for="openai_key" class="form-label">OpenAI API Key:</label>
-                                <input type="password" class="form-control" id="openai_key" name="openai_key">
+                                <input type="password" class="form-control" id="openai_key" name="openai_key" value="{{ saved_openai_key }}">
                                 <small class="text-muted">Required for quiz mode</small>
+                            </div>
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="remember" name="remember" {% if saved_email %}checked{% endif %}>
+                                <label class="form-check-label" for="remember">Remember Me</label>
                             </div>
                             <button type="submit" class="btn btn-primary w-100" id="startButton">Start Membean</button>
                         </form>

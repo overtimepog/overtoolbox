@@ -1,9 +1,9 @@
-from flask import Flask, jsonify, render_template, request, redirect, url_for, session, flash, Response, send_from_directory
+from flask import Flask, jsonify, render_template, request, redirect, url_for, session, flash, Response, send_from_directory, make_response
 import concurrent.futures
 import os
 import queue
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 # import stripe
 from ZybookAuto import signin, get_books, get_chapters, solve_sections_in_range, ZyBooksError, solve_section
 import asyncio
@@ -37,6 +37,7 @@ def membean_route():
         grade = request.form['grade']
         quiz = request.form['quiz']
         openai_key = request.form.get('openai_key')
+        remember = request.form.get('remember') == 'on'
         
         # Validate OpenAI key is provided when quiz mode is enabled
         if quiz == 'True' and not openai_key:
@@ -48,7 +49,28 @@ def membean_route():
             if quiz == 'True':
                 args.extend(['-k', openai_key])
             
-            # Start membean in a separate thread to not block the main thread
+            # Create response object
+            resp = make_response(redirect(url_for('membean_route')))
+            
+            # Set cookies if remember me is checked
+            if remember:
+                # Save credentials and settings
+                resp.set_cookie('membean_email', email, max_age=30*24*60*60)  # 30 days
+                resp.set_cookie('membean_password', password, max_age=30*24*60*60, secure=True, httponly=True)
+                resp.set_cookie('membean_grade', grade, max_age=30*24*60*60)
+                resp.set_cookie('membean_quiz', quiz, max_age=30*24*60*60)
+                # Save OpenAI key if provided
+                if openai_key:
+                    resp.set_cookie('membean_openai_key', openai_key, max_age=30*24*60*60, secure=True, httponly=True)
+            else:
+                # Clear all cookies if remember me is unchecked
+                resp.delete_cookie('membean_email')
+                resp.delete_cookie('membean_password')
+                resp.delete_cookie('membean_grade')
+                resp.delete_cookie('membean_quiz')
+                resp.delete_cookie('membean_openai_key')
+            
+            # Start membean in a separate thread
             def run_membean():
                 try:
                     capture_output(membean_output, "Starting Membean Docker container...")
@@ -62,12 +84,25 @@ def membean_route():
             thread.start()
             
             flash('Membean session started successfully!')
+            return resp
+            
         except Exception as e:
             flash(f'Error starting Membean: {str(e)}')
-        
-        return redirect(url_for('membean_route'))
-        
-    return render_template('membean.html')
+            return redirect(url_for('membean_route'))
+    
+    # For GET request, get saved credentials and settings from cookies
+    saved_email = request.cookies.get('membean_email', '')
+    saved_password = request.cookies.get('membean_password', '')
+    saved_grade = request.cookies.get('membean_grade', '')
+    saved_quiz = request.cookies.get('membean_quiz', '')
+    saved_openai_key = request.cookies.get('membean_openai_key', '')
+    
+    return render_template('membean.html', 
+                         saved_email=saved_email,
+                         saved_password=saved_password,
+                         saved_grade=saved_grade,
+                         saved_quiz=saved_quiz,
+                         saved_openai_key=saved_openai_key)
 
 # Route for login page
 @app.route('/', methods=['GET', 'POST'])
@@ -89,29 +124,50 @@ def login():
 # Route for selecting ZyBook and sections
 @app.route('/zybook', methods=['GET', 'POST'])
 def zybook():
-    if 'auth_token' not in session:
-        return redirect(url_for('login'))
+    if request.method == 'POST':
+        usr = request.form['email']
+        pwd = request.form['password']
+        remember = request.form.get('remember') == 'on'
+        
+        try:
+            session_data = signin(usr, pwd)
+            session['user_id'] = session_data['user_id']
+            session['email'] = usr
+            session['auth_token'] = serializer.dumps(session_data['auth_token'])
+            
+            # Create response object for redirect
+            resp = make_response(redirect(url_for('select_sections')))
+            
+            # Set cookies if remember me is checked
+            if remember:
+                resp.set_cookie('zybooks_email', usr, max_age=30*24*60*60)  # 30 days
+                resp.set_cookie('zybooks_password', pwd, max_age=30*24*60*60, secure=True, httponly=True)
+            else:
+                resp.delete_cookie('zybooks_email')
+                resp.delete_cookie('zybooks_password')
+            
+            return resp
+            
+        except ZyBooksError as e:
+            flash(f"Login failed: {str(e)}")
+            return redirect(url_for('zybook'))
 
+    # For GET request, get saved credentials from cookies
+    saved_email = request.cookies.get('zybooks_email', '')
+    saved_password = request.cookies.get('zybooks_password', '')
+    
+    # Get list of ZyBooks if user is authenticated
     try:
-        auth = serializer.loads(session['auth_token'], max_age=3600)
+        if 'auth_token' in session:
+            auth = serializer.loads(session['auth_token'], max_age=3600)
+            usr_id = session['user_id']
+            books = get_books(auth, usr_id)
+        else:
+            books = []
     except Exception:
-        flash("Session expired. Please log in again.")
-        return redirect(url_for('login'))
-
-    usr_id = session['user_id']
-
-    # Get list of ZyBooks
-    try:
-        books = get_books(auth, usr_id)
-        if request.method == 'POST':
-            selected_book_index = int(request.form['zybook']) - 1
-            selected_book = books[selected_book_index]
-            session['zybook_code'] = selected_book['zybook_code']
-            return redirect(url_for('select_sections'))
-        return render_template('zybook.html', books=books)
-    except ZyBooksError as e:
-        flash(f"Failed to retrieve ZyBooks: {str(e)}")
-        return redirect(url_for('login'))
+        books = []
+        
+    return render_template('zybook.html', books=books, saved_email=saved_email, saved_password=saved_password)
 
 # Route for selecting sections and solving
 @app.route('/select_sections', methods=['GET', 'POST'])
