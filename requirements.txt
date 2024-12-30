@@ -4,4 +4,4 @@ beautifulsoup4>=4.9.3
 requests>=2.25.1
 docker>=6.0.0
 openai>=1.0.0
-distutils
+halo
