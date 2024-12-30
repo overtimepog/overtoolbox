@@ -5,7 +5,7 @@ import queue
 import threading
 from datetime import datetime
 # import stripe
-from ZybookAuto import signin, get_books, get_chapters, solve_sections_in_range, ZyBooksError
+from ZybookAuto import signin, get_books, get_chapters, solve_sections_in_range, ZyBooksError, solve_section
 import asyncio
 from membean import membean
 from itsdangerous import URLSafeTimedSerializer
