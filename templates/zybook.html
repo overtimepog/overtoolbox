@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZyBooks Auto Solver - Select ZyBook</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -14,16 +15,19 @@
             font-family: 'Arial', sans-serif;
             background-color: #181818;
             color: #e0e0e0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
+            min-height: 100vh;
             padding: 20px;
         }
-        .container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+        .navbar {
+            background-color: #1f1f1f;
+            margin-bottom: 30px;
+        }
+        .navbar-brand, .nav-link {
+            color: #f39c12 !important;
+        }
+        .main-container {
+            max-width: 800px;
+            margin: 0 auto;
         }
         h1 {
             color: #f39c12;
@@ -31,16 +35,17 @@
             text-align: center;
             font-size: 2.5rem;
         }
-        form {
+        .card {
             background: #1f1f1f;
-            padding: 30px;
+            border: none;
             border-radius: 12px;
             box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6);
             max-width: 400px;
             width: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            margin: 0 auto;
+        }
+        .card-body {
+            padding: 30px;
         }
         label {
             font-weight: bold;
@@ -49,19 +54,20 @@
             width: 100%;
             text-align: left;
         }
-        select, input {
-            width: 100%;
+        .form-control, .form-select, select, input {
+            background-color: #333;
+            border: none;
+            color: #e0e0e0;
             padding: 12px;
             margin-bottom: 20px;
-            border: none;
             border-radius: 8px;
+            width: 100%;
+        }
+        .form-control:focus, .form-select:focus, select:focus, input:focus {
             background-color: #333;
             color: #e0e0e0;
-            font-size: 1rem;
-        }
-        select:focus, input:focus {
-            outline: none;
             box-shadow: 0 0 8px #f39c12;
+            outline: none;
         }
         button {
             background-color: #f39c12;
@@ -90,32 +96,70 @@
             font-weight: normal;
             color: #e0e0e0;
         }
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: #b3b3b3;
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            left: 0;
+            background-color: #1f1f1f;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">OverToolbox</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Home</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container main-container">
         <h1>Select ZyBook</h1>
-        <form action="/zybook" method="POST">
-            <div style="width: 100%; margin-bottom: 20px;">
-                <label for="email">Email:</label>
-                <input type="email" id="email" name="email" value="{{ saved_email }}" required>
+        <div class="card">
+            <div class="card-body">
+                <form action="/zybook" method="POST">
+                    <div class="mb-3">
+                        <label for="email">Email:</label>
+                        <input type="email" class="form-control" id="email" name="email" value="{{ saved_email }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password">Password:</label>
+                        <input type="password" class="form-control" id="password" name="password" value="{{ saved_password }}" required>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="remember" name="remember" {% if saved_email %}checked{% endif %}>
+                        <label class="form-check-label" for="remember">Remember Me</label>
+                    </div>
+                    <div class="mb-3">
+                        <label for="zybook">Select ZyBook:</label>
+                        <select class="form-select" id="zybook" name="zybook">
+                            {% for book in books %}
+                                <option value="{{ loop.index }}">{{ book['title'] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit">Next</button>
+                </form>
             </div>
-            <div style="width: 100%; margin-bottom: 20px;">
-                <label for="password">Password:</label>
-                <input type="password" id="password" name="password" value="{{ saved_password }}" required>
-            </div>
-            <div class="form-check">
-                <input type="checkbox" id="remember" name="remember" {% if saved_email %}checked{% endif %}>
-                <label for="remember">Remember Me</label>
-            </div>
-            <label for="zybook">Select ZyBook:</label>
-            <select id="zybook" name="zybook">
-                {% for book in books %}
-                    <option value="{{ loop.index }}">{{ book['title'] }}</option>
-                {% endfor %}
-            </select>
-            <button type="submit">Next</button>
-        </form>
+        </div>
     </div>
+
+    <footer>
+        <p class="mb-0">© 2024 OverToolbox. All rights reserved.</p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
