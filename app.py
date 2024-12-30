@@ -1,14 +1,73 @@
-from flask import Flask, jsonify, render_template, request, redirect, url_for, session, flash
+from flask import Flask, jsonify, render_template, request, redirect, url_for, session, flash, Response, send_from_directory
 import concurrent.futures
 import os
-import stripe
+import queue
+import threading
+from datetime import datetime
+# import stripe
 from ZybookAuto import signin, get_books, get_chapters, solve_sections_in_range, ZyBooksError
+import asyncio
+from membean import membean
 from itsdangerous import URLSafeTimedSerializer
 
-app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'supersupersupersecretkey')
-stripe.api_key = os.getenv('STRIPE_PRIVATE_KEY')
+# Initialize Flask app with static folder configuration
+app = Flask(__name__, 
+    static_url_path='/static',
+    static_folder='templates/static'
+)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'supersupersupersecretsuperkey')
+# stripe.api_key = os.getenv('STRIPE_PRIVATE_KEY')
 serializer = URLSafeTimedSerializer(app.secret_key)
+
+# Create queues for output streaming
+zybooks_output = queue.Queue()
+membean_output = queue.Queue()
+
+# Route for main menu
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+# Membean routes
+@app.route('/membean', methods=['GET', 'POST'])
+def membean_route():
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        grade = request.form['grade']
+        quiz = request.form['quiz']
+        openai_key = request.form.get('openai_key')
+        
+        # Validate OpenAI key is provided when quiz mode is enabled
+        if quiz == 'True' and not openai_key:
+            flash('OpenAI API key is required when quiz mode is enabled')
+            return redirect(url_for('membean_route'))
+        
+        try:
+            args = ['-e', email, '-p', password, '-g', grade, '-q', quiz]
+            if quiz == 'True':
+                args.extend(['-k', openai_key])
+            
+            # Start membean in a separate thread to not block the main thread
+            def run_membean():
+                try:
+                    capture_output(membean_output, "Starting Membean Docker container...")
+                    asyncio.run(membean(args))
+                    capture_output(membean_output, "Membean session completed successfully!")
+                except Exception as e:
+                    capture_output(membean_output, f"Error in Membean: {str(e)}")
+            
+            thread = threading.Thread(target=run_membean)
+            thread.daemon = True
+            thread.start()
+            
+            flash('Membean session started successfully!')
+        except Exception as e:
+            flash(f'Error starting Membean: {str(e)}')
+        
+        return redirect(url_for('membean_route'))
+        
+    return render_template('membean.html')
 
 # Route for login page
 @app.route('/', methods=['GET', 'POST'])
@@ -162,75 +221,141 @@ def calculate_sections(chapters, start_chapter, start_section, end_chapter, end_
 
     return section_count
 
-@app.route('/create-checkout-session/<sections>', methods=['GET'])
-def create_checkout_session(sections):
-    try:
-        # Get the chapters from the session (since they were already retrieved during section selection)
-        if 'zybook_code' not in session or 'auth_token' not in session:
-            return redirect(url_for('login'))
+# Stripe routes commented out
+# @app.route('/create-checkout-session/<sections>', methods=['GET'])
+# def create_checkout_session(sections):
+#     try:
+#         # Get the chapters from the session (since they were already retrieved during section selection)
+#         if 'zybook_code' not in session or 'auth_token' not in session:
+#             return redirect(url_for('login'))
+# 
+#         try:
+#             auth = serializer.loads(session['auth_token'], max_age=3600)
+#         except Exception:
+#             flash("Session expired. Please log in again.")
+#             return redirect(url_for('login'))
+# 
+#         zybook_code = session['zybook_code']
+#         chapters = get_chapters(zybook_code, auth)
+# 
+#         # Parse the input string (e.g., "5.6-5.7, 5.9")
+#         section_ranges = sections.split(',')
+#         section_count = 0
+# 
+#         # Loop through each range and calculate the sections
+#         for section_range in section_ranges:
+#             section_range = section_range.strip()
+#             if '-' in section_range:
+#                 # Range format (e.g., "5.6-5.7")
+#                 start, end = section_range.split('-')
+#                 start_chapter, start_section = map(int, start.split('.'))
+#                 end_chapter, end_section = map(int, end.split('.'))
+#             else:
+#                 # Single section format (e.g., "5.9")
+#                 start_chapter, start_section = map(int, section_range.split('.'))
+#                 end_chapter, end_section = start_chapter, start_section
+# 
+#             # Calculate the number of sections for the current range
+#             section_count += calculate_sections(chapters, start_chapter, start_section, end_chapter, end_section)
+# 
+#         # Calculate the total price (in cents) at $1.25 per section
+#         price_per_section = 125 # $1.25 in cents
+#         total_price = section_count * price_per_section
+# 
+#         # Create a new Stripe Checkout Session
+#         checkout_session = stripe.checkout.Session.create(
+#             payment_method_types=['card'],
+#             line_items=[{
+#                 'price_data': {
+#                     'currency': 'usd',
+#                     'product_data': {
+#                         'name': 'ZyBooks Section Solver',
+#                         'description': f'Solving {section_count} sections: {sections}',
+#                     },
+#                     'unit_amount': total_price,  # Total price based on number of sections
+#                 },
+#                 'quantity': 1,
+#             }],
+#             mode='payment',
+#             success_url=url_for('success', _external=True),
+#             cancel_url=url_for('cancel', _external=True),
+#         )
+#         return jsonify({'id': checkout_session.id})
+#     except Exception as e:
+#         return str(e)
+#     
+# @app.route('/success')
+# def success():
+#     return "Payment was successful! We are now solving your ZyBook sections."
+# 
+# @app.route('/cancel')
+# def cancel():
+#     return "Payment was cancelled. Please try again."
 
-        try:
-            auth = serializer.loads(session['auth_token'], max_age=3600)
-        except Exception:
-            flash("Session expired. Please log in again.")
-            return redirect(url_for('login'))
-
-        zybook_code = session['zybook_code']
-        chapters = get_chapters(zybook_code, auth)
-
-        # Parse the input string (e.g., "5.6-5.7, 5.9")
-        section_ranges = sections.split(',')
-        section_count = 0
-
-        # Loop through each range and calculate the sections
-        for section_range in section_ranges:
-            section_range = section_range.strip()
-            if '-' in section_range:
-                # Range format (e.g., "5.6-5.7")
-                start, end = section_range.split('-')
-                start_chapter, start_section = map(int, start.split('.'))
-                end_chapter, end_section = map(int, end.split('.'))
-            else:
-                # Single section format (e.g., "5.9")
-                start_chapter, start_section = map(int, section_range.split('.'))
-                end_chapter, end_section = start_chapter, start_section
-
-            # Calculate the number of sections for the current range
-            section_count += calculate_sections(chapters, start_chapter, start_section, end_chapter, end_section)
-
-        # Calculate the total price (in cents) at $1.25 per section
-        price_per_section = 125 # $1.25 in cents
-        total_price = section_count * price_per_section
-
-        # Create a new Stripe Checkout Session
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=['card'],
-            line_items=[{
-                'price_data': {
-                    'currency': 'usd',
-                    'product_data': {
-                        'name': 'ZyBooks Section Solver',
-                        'description': f'Solving {section_count} sections: {sections}',
-                    },
-                    'unit_amount': total_price,  # Total price based on number of sections
-                },
-                'quantity': 1,
-            }],
-            mode='payment',
-            success_url=url_for('success', _external=True),
-            cancel_url=url_for('cancel', _external=True),
-        )
-        return jsonify({'id': checkout_session.id})
-    except Exception as e:
-        return str(e)
+# Route for streaming Zybooks terminal output
+@app.route('/terminal-output')
+def terminal_output():
+    def generate():
+        while True:
+            try:
+                # Get output from queue with timeout
+                output = zybooks_output.get(timeout=1)
+                yield f"data: {output}\n\n"
+            except queue.Empty:
+                # If no output for 1 second, send heartbeat
+                yield f"data: {datetime.now().isoformat()}\n\n"
     
-@app.route('/success')
-def success():
-    return "Payment was successful! We are now solving your ZyBook sections."
+    return Response(generate(), mimetype='text/event-stream')
 
-@app.route('/cancel')
-def cancel():
-    return "Payment was cancelled. Please try again."
+# Route for streaming Docker container output
+@app.route('/docker-output')
+def docker_output():
+    def generate():
+        while True:
+            try:
+                # Get output from queue with timeout
+                output = membean_output.get(timeout=1)
+                yield f"data: {output}\n\n"
+            except queue.Empty:
+                # If no output for 1 second, send heartbeat
+                yield f"data: {datetime.now().isoformat()}\n\n"
+    
+    return Response(generate(), mimetype='text/event-stream')
+
+# Helper function to capture and queue output
+def capture_output(queue_obj, output_str):
+    queue_obj.put(output_str)
+
+# Update the solve_sections_in_range function to capture output
+def solve_sections_in_range(start_chapter, start_section, end_chapter, end_section, chapters, code, auth):
+    """Solve sections in a range across chapters."""
+    for chapter in chapters:
+        chapter_num = int(chapter['number'])
+
+        if chapter_num < start_chapter:
+            continue
+
+        if chapter_num > end_chapter:
+            break
+
+        for section in chapter['sections']:
+            section_num = int(section['number'])
+
+            if chapter_num == start_chapter and section_num < start_section:
+                continue
+
+            if chapter_num == end_chapter and section_num > end_section:
+                break
+
+            # Capture output for the current section
+            output = f"Solving section {chapter_num}.{section_num}..."
+            capture_output(zybooks_output, output)
+            
+            try:
+                solve_section(section, code, chapter, auth)
+                capture_output(zybooks_output, f"Completed section {chapter_num}.{section_num}")
+            except Exception as e:
+                capture_output(zybooks_output, f"Error in section {chapter_num}.{section_num}: {str(e)}")
 
 if __name__ == '__main__':
     app.run(debug=False)

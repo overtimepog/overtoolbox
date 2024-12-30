@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Membean - OverToolbox</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">OverToolbox</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Home</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container main-container">
+        <h2 class="text-center mb-4 fade-in">Membean Automation</h2>
+        
+        <div class="row justify-content-center">
+            <div class="col-md-8 fade-in" style="animation-delay: 0.2s">
+                <div class="card">
+                    <div class="card-body">
+                        <form method="POST" id="membeanForm">
+                            <div class="mb-3">
+                                <label for="email" class="form-label">Email:</label>
+                                <input type="email" class="form-control" id="email" name="email" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="password" class="form-label">Password:</label>
+                                <input type="password" class="form-control" id="password" name="password" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="grade" class="form-label">Target Grade:</label>
+                                <select class="form-select" id="grade" name="grade" required>
+                                    <option value="A+">A+</option>
+                                    <option value="A">A</option>
+                                    <option value="A-">A-</option>
+                                    <option value="B+">B+</option>
+                                    <option value="B">B</option>
+                                    <option value="B-">B-</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="quiz" class="form-label">Quiz Mode:</label>
+                                <select class="form-select" id="quiz" name="quiz" required>
+                                    <option value="False">Disabled</option>
+                                    <option value="True">Enabled</option>
+                                </select>
+                            </div>
+                            <div class="mb-3" id="openaiKeyGroup" style="display: none;">
+                                <label for="openai_key" class="form-label">OpenAI API Key:</label>
+                                <input type="password" class="form-control" id="openai_key" name="openai_key">
+                                <small class="text-muted">Required for quiz mode</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100" id="startButton">Start Membean</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div id="docker-output" class="output-container fade-in" style="display: none;">
+                    <pre class="output-text" id="dockerText"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p class="mb-0">© 2024 OverToolbox. All rights reserved.</p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.getElementById('quiz').addEventListener('change', function() {
+            const openaiKeyGroup = document.getElementById('openaiKeyGroup');
+            openaiKeyGroup.style.display = this.value === 'True' ? 'block' : 'none';
+            document.getElementById('openai_key').required = this.value === 'True';
+        });
+
+        document.getElementById('membeanForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const dockerOutput = document.getElementById('docker-output');
+            dockerOutput.style.display = 'block';
+            
+            this.submit();
+            
+            const eventSource = new EventSource('/docker-output');
+            eventSource.onmessage = function(e) {
+                const dockerText = document.getElementById('dockerText');
+                dockerText.textContent += e.data + '\n';
+                dockerOutput.scrollTop = dockerOutput.scrollHeight;
+            };
+        });
+    </script>
+</body>
+</html>
